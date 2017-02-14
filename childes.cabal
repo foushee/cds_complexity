@@ -1,0 +1,41 @@
+-- This file has been generated from package.yaml by hpack version 0.15.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:                childes
+version:             0.0.0.0
+synopsis:            Ruthe's
+description:         Blah
+category:            Language
+homepage:            http://github.com/jkarni/childes
+bug-reports:         https://github.com/jkarni/childes/issues
+license:             BSD3
+license-file:        LICENSE
+tested-with:         GHC == 8.0.1
+author:              Julian K. Arni
+maintainer:          jkarni@gmail.com
+copyright:           (c) Julian K. Arni
+build-type:          Simple
+cabal-version:       >= 1.10
+
+extra-source-files:
+    package.yaml
+
+source-repository head
+  type: git
+  location: https://github.com/jkarni/childes
+
+library
+  exposed-modules:
+      Childes
+  build-depends:
+      base >= 4.7 && < 4.10
+    , hxt
+    , xml-lens
+    , text
+    , xml-conduit
+  hs-source-dirs:
+      src
+  default-extensions: AutoDeriveTypeable ConstraintKinds DataKinds DefaultSignatures DeriveFoldable DeriveFunctor DeriveGeneric DeriveTraversable FlexibleContexts FlexibleInstances FunctionalDependencies GADTs KindSignatures MultiParamTypeClasses OverloadedStrings StandaloneDeriving RankNTypes ScopedTypeVariables TypeFamilies TypeOperators
+  ghc-options: -Wall
+  default-language: Haskell2010
