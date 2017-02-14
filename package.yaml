@@ -23,6 +23,7 @@ dependencies:
   - xml-lens
   - text
   - xml-conduit
+  - cassava
 
 default-extensions:
   - AutoDeriveTypeable
@@ -49,6 +50,14 @@ default-extensions:
 library:
   source-dirs:      src
   other-modules:    []
+
+executables:
+  childes:
+    main:            Main.hs
+    source-dirs:     exe
+    dependencies:
+      - childes
+      - directory
 
 #tests:
   #spec:

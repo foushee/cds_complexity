@@ -1,16 +1,37 @@
+{-# LANGUAGE DeriveAnyClass #-}
 module Childes where
 
+import           Control.Monad
+import           Data.Csv
+import           Data.Either
 import           Data.List
 import qualified Data.Text     as T
+import           GHC.Generics  (Generic)
+import           GHC.Stack
 import qualified Text.XML      as XML
 import           Text.XML.Lens
 
 ------------------------------------------------------------------------------
--- We want:
---   1. Number of tokens per minute
---   2. Number of types per minute
---   3. Duration of utterance
-------------------------------------------------------------------------------
+
+allStats :: FilePath -> IO AllStats
+allStats fp = do
+  doc <- XML.readFile XML.def fp
+  let (bad, good) = partitionEithers $ parseTranscript doc
+  return $ AllStats
+    { durationStats = makeStats good UtteranceDuration
+    , tokenStats = makeStats good TokensPerSec
+    , typeStats = makeStats good TypesPerSec
+    , ignoredUtterances = length bad
+    }
+
+
+makeStats :: [Utterance] -> StatType -> [Stats]
+makeStats us s = case s of
+  TokensPerSec -> (\s -> Stats s (average $ tokensPerSec s us)) <$> allSpeakers
+  TypesPerSec -> (\s -> Stats s (average $ typesPerSec s us)) <$> allSpeakers
+  UtteranceDuration -> (\s -> Stats s (average $ durations s us)) <$> allSpeakers
+  where
+    allSpeakers = [minBound..maxBound]
 ------------------------------------------------------------------------------
 -- 1 - Tokens per minute {{{
 
@@ -23,9 +44,6 @@ tokensPerSec speaker allUtterances = map eachAnswer relevantUtterances
   tokens :: Utterance -> Int
   tokens utt = length (content utt)
 
-  duration :: Utterance -> Float
-  duration utt = endTime utt - startTime utt
-
   relevantUtterances :: [Utterance]
   relevantUtterances = filter (\x -> utteranceSpeaker x == speaker)
                               allUtterances
@@ -35,22 +53,38 @@ tokensPerSec speaker allUtterances = map eachAnswer relevantUtterances
 ------------------------------------------------------------------------------
 -- 2 - Types per minute {{{
 
+typesPerSec :: Speaker -> [Utterance] -> [Float]
+typesPerSec speaker allUtterances = map eachAnswer relevantUtterances
+  where
+  eachAnswer :: Utterance -> Float
+  eachAnswer utt = fromIntegral (types utt) / duration utt
+
+  types :: Utterance -> Int
+  types utt = length (nub $ content utt)
+
+  relevantUtterances :: [Utterance]
+  relevantUtterances = filter (\x -> utteranceSpeaker x == speaker)
+                              allUtterances
 ---------------------------------------------------------------------------}}}
 ------------------------------------------------------------------------------
 -- 3 - Duration of utterance {{{
 
+durations :: Speaker -> [Utterance] -> [Float]
+durations speaker allUtterances = map duration relevantUtterances
+  where
+  relevantUtterances :: [Utterance]
+  relevantUtterances = filter (\x -> utteranceSpeaker x == speaker)
+                              allUtterances
 ---------------------------------------------------------------------------}}}
 ------------------------------------------------------------------------------
 -- Helpers {{{
 
-numberOfTokens :: String -> Int
-numberOfTokens corpus = length (words corpus)
+data Speaker = MOT | CHI | FAT | GRA | ADU | AD1 | AD2 | TOY | ENV | GR1 | GR2
+  deriving (Eq, Show, Enum, Read, Bounded)
+instance ToField Speaker
 
-numberOfTypes :: String -> Int
-numberOfTypes corpus = length (nub (words corpus))
-
-data Speaker = MOT | CHI | FAT
-  deriving (Eq, Show, Read)
+data StatType = TokensPerSec | TypesPerSec | UtteranceDuration
+  deriving (Eq, Show, Enum, Read, Bounded)
 
 data Utterance = Utterance
   { startTime        :: Float
@@ -59,21 +93,49 @@ data Utterance = Utterance
   , utteranceSpeaker :: Speaker
   } deriving (Eq, Show, Read)
 
+data Stats = Stats
+  { statsSpeaker :: Speaker
+  , statsMean    :: Float
+  } deriving (Eq, Show, Read, Generic)
+instance ToRecord Stats
+
+data AllStats = AllStats
+  { durationStats     :: [Stats]
+  , tokenStats        :: [Stats]
+  , typeStats         :: [Stats]
+  , ignoredUtterances :: Int
+  } deriving (Eq, Show, Read, Generic)
+
+prettyIsh :: AllStats -> IO ()
+prettyIsh a = do
+  putStrLn "Duration:"
+  forM_ (durationStats a) $ \s -> do
+    putStrLn $ "Speaker:\t" ++ (show $ statsSpeaker s)
+    putStrLn $ "Mean:\t" ++ (show $ statsMean s)
+
+  putStrLn "Token:"
+  forM_ (tokenStats a) $ \s -> do
+    putStrLn $ "Speaker:\t" ++ (show $ statsSpeaker s)
+    putStrLn $ "Mean:\t" ++ (show $ statsMean s)
+
+  putStrLn "Type:"
+  forM_ (typeStats a) $ \s -> do
+    putStrLn $ "Speaker:\t" ++ (show $ statsSpeaker s)
+    putStrLn $ "Mean:\t" ++ (show $ statsMean s)
+
+  putStrLn $ "Ignored " ++ show (ignoredUtterances a) ++ " utterances"
+
 duration :: Utterance -> Float
 duration u = endTime u - startTime u
 
 sampleFile :: IO Document
-sampleFile = XML.readFile XML.def "Providence/Naima/nai01.xml"
+sampleFile = XML.readFile XML.def "Providence/Naima/nai54.xml"
 
 average :: [Float] -> Float
 average x = sum x / fromIntegral (length x)
 
 parseTranscript :: Document -> [Either String Utterance]
 parseTranscript doc = doc ^.. root . entire . named "u" . to parseUtterance
-  where
-    p x = case parseUtterance x of
-      Left e -> error $ "Parsing utterance:\n" ++ show x ++ "\n\nIN:\n\n" ++ e
-      Right v -> v
 
 parseUtterance :: Element -> Either String Utterance
 parseUtterance s = do
@@ -89,7 +151,4 @@ parseUtterance s = do
     comm s Nothing = Left s
     comm _ (Just v)  = Right v
 
-
-newtype Transcript = Transcript { getTranscript ::  String }
-  deriving (Eq, Show, Read)
 ---------------------------------------------------------------------------}}}
