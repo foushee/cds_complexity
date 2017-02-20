@@ -35,6 +35,7 @@ library
     , text
     , xml-conduit
     , cassava
+    , inline-r
   hs-source-dirs:
       src
   default-extensions: AutoDeriveTypeable ConstraintKinds DataKinds DefaultSignatures DeriveFoldable DeriveFunctor DeriveGeneric DeriveTraversable FlexibleContexts FlexibleInstances FunctionalDependencies GADTs KindSignatures MultiParamTypeClasses OverloadedStrings StandaloneDeriving RankNTypes ScopedTypeVariables TypeFamilies TypeOperators
@@ -54,6 +55,7 @@ executable childes
     , text
     , xml-conduit
     , cassava
+    , inline-r
     , childes
     , directory
   default-language: Haskell2010
