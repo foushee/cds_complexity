@@ -1,2 +1,20 @@
-1. Filter for only CHI + 1!CHI
-2. Replicate for other longitudinal corpora
+1. Filter transcripts to only include ones where there are only two speakers: a child (CHI) and an adult (any non-CHI: e.g., MOT, FAT). This is so we can make it as likely as possible that any speech from the adult is actually directed to the target child—whose age we know—and not to another adult in the room. 
+
+2. Export results with corpus, Speaker, and CHI age to .csv for plotting
+
+3. in R: Plot adult pace for each speaker (e.g., MOT to Naima) against CHI age
+	- in tokens/sec
+	- in types/sec
+	- utterance duration
+Plot raw points for each age, and 
+	- add means + standard deviations
+	- fit regression line to points
+
+4. Repeat analysis for all corpora in Providence corpus (eventually all CHILDES longitudinal corpora)
+
+5. Repeat analysis for Switchboard corpus.
+
+6. in R: Statistics on data from all corpora and speakers.
+
+
+
