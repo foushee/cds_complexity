@@ -24,7 +24,8 @@ dependencies:
   - text
   - xml-conduit
   - cassava
-  - inline-r
+  - time
+  - bytestring
 
 default-extensions:
   - AutoDeriveTypeable

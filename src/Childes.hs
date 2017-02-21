@@ -1,154 +1,146 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 module Childes where
 
-import           Control.Monad
+import qualified Data.ByteString.Lazy as BS
 import           Data.Csv
-import           Data.Either
 import           Data.List
-import qualified Data.Text     as T
-import           GHC.Generics  (Generic)
-import           GHC.Stack
-import qualified Text.XML      as XML
+import           Data.Monoid
+import           Data.String          (IsString (..))
+import qualified Data.Text            as T
+import           Data.Time            (defaultTimeLocale, diffUTCTime,
+                                       parseTimeOrError)
+import           GHC.Generics         (Generic)
+import           GHC.Stack            (HasCallStack)
+import qualified Text.XML             as XML
 import           Text.XML.Lens
 
-------------------------------------------------------------------------------
 
-allStats :: FilePath -> IO AllStats
-allStats fp = do
-  doc <- XML.readFile XML.def fp
-  let (bad, good) = partitionEithers $ parseTranscript doc
-  return $ AllStats
-    { durationStats = makeStats good UtteranceDuration
-    , tokenStats = makeStats good TokensPerSec
-    , typeStats = makeStats good TypesPerSec
-    , ignoredUtterances = length bad
-    }
+newtype Speaker = Speaker { getSpeaker :: T.Text }
+  deriving (Eq, Show, Read, IsString)
 
+instance ToField Speaker where
+  toField = toField . getSpeaker
 
-makeStats :: [Utterance] -> StatType -> [Stats]
-makeStats us s = case s of
-  TokensPerSec -> (\s -> Stats s (average $ tokensPerSec s us)) <$> allSpeakers
-  TypesPerSec -> (\s -> Stats s (average $ typesPerSec s us)) <$> allSpeakers
-  UtteranceDuration -> (\s -> Stats s (average $ durations s us)) <$> allSpeakers
-  where
-    allSpeakers = [minBound..maxBound]
-------------------------------------------------------------------------------
--- 1 - Tokens per minute {{{
+data Transcript = Transcript
+  { tcCorpus     :: T.Text
+  , tcChild      :: T.Text
+  , tcChildAge   :: Float
+  , tcUtterances :: [Either Error Utterance]
+  , tcFile       :: FilePath
+  } deriving (Eq, Show, Read, Generic)
 
-tokensPerSec :: Speaker -> [Utterance] -> [Float]
-tokensPerSec speaker allUtterances = map eachAnswer relevantUtterances
-  where
-  eachAnswer :: Utterance -> Float
-  eachAnswer utt = fromIntegral (tokens utt) / duration utt
-
-  tokens :: Utterance -> Int
-  tokens utt = length (content utt)
-
-  relevantUtterances :: [Utterance]
-  relevantUtterances = filter (\x -> utteranceSpeaker x == speaker)
-                              allUtterances
-
-
----------------------------------------------------------------------------}}}
-------------------------------------------------------------------------------
--- 2 - Types per minute {{{
-
-typesPerSec :: Speaker -> [Utterance] -> [Float]
-typesPerSec speaker allUtterances = map eachAnswer relevantUtterances
-  where
-  eachAnswer :: Utterance -> Float
-  eachAnswer utt = fromIntegral (types utt) / duration utt
-
-  types :: Utterance -> Int
-  types utt = length (nub $ content utt)
-
-  relevantUtterances :: [Utterance]
-  relevantUtterances = filter (\x -> utteranceSpeaker x == speaker)
-                              allUtterances
----------------------------------------------------------------------------}}}
-------------------------------------------------------------------------------
--- 3 - Duration of utterance {{{
-
-durations :: Speaker -> [Utterance] -> [Float]
-durations speaker allUtterances = map duration relevantUtterances
-  where
-  relevantUtterances :: [Utterance]
-  relevantUtterances = filter (\x -> utteranceSpeaker x == speaker)
-                              allUtterances
----------------------------------------------------------------------------}}}
-------------------------------------------------------------------------------
--- Helpers {{{
-
-data Speaker = MOT | CHI | FAT | GRA | ADU | AD1 | AD2 | TOY | ENV | GR1 | GR2
-  deriving (Eq, Show, Enum, Read, Bounded)
-instance ToField Speaker
-
-data StatType = TokensPerSec | TypesPerSec | UtteranceDuration
-  deriving (Eq, Show, Enum, Read, Bounded)
+toCSV :: [Transcript] -> BS.ByteString
+toCSV ts = encodeDefaultOrderedByName . concat $ transcriptToRows <$> ts
 
 data Utterance = Utterance
   { startTime        :: Float
   , endTime          :: Float
   , content          :: [T.Text]
   , utteranceSpeaker :: Speaker
-  } deriving (Eq, Show, Read)
-
-data Stats = Stats
-  { statsSpeaker :: Speaker
-  , statsMean    :: Float
-  } deriving (Eq, Show, Read, Generic)
-instance ToRecord Stats
-
-data AllStats = AllStats
-  { durationStats     :: [Stats]
-  , tokenStats        :: [Stats]
-  , typeStats         :: [Stats]
-  , ignoredUtterances :: Int
   } deriving (Eq, Show, Read, Generic)
 
-prettyIsh :: AllStats -> IO ()
-prettyIsh a = do
-  putStrLn "Duration:"
-  forM_ (durationStats a) $ \s -> do
-    putStrLn $ "Speaker:\t" ++ (show $ statsSpeaker s)
-    putStrLn $ "Mean:\t" ++ (show $ statsMean s)
+data Error = NoMediaTag Speaker | MissingSpeaker | UnknownError
+  deriving (Eq, Show, Read, Generic)
 
-  putStrLn "Token:"
-  forM_ (tokenStats a) $ \s -> do
-    putStrLn $ "Speaker:\t" ++ (show $ statsSpeaker s)
-    putStrLn $ "Mean:\t" ++ (show $ statsMean s)
+instance ToField Error where
+  toField (NoMediaTag e) = toField $ "No media tag for speaker:" <> getSpeaker e
+  toField MissingSpeaker = "Speaker missing"
+  toField UnknownError = "Unknown error"
 
-  putStrLn "Type:"
-  forM_ (typeStats a) $ \s -> do
-    putStrLn $ "Speaker:\t" ++ (show $ statsSpeaker s)
-    putStrLn $ "Mean:\t" ++ (show $ statsMean s)
+transcriptToRows :: Transcript -> [Row]
+transcriptToRows ts = rows
+  where
+    rows = fmap (uncurry $ utteranceToRow ts) ixUtts
+    ixUtts = zip [1..] $ tcUtterances ts
 
-  putStrLn $ "Ignored " ++ show (ignoredUtterances a) ++ " utterances"
+utteranceToRow :: Transcript -> Int -> Either Error Utterance -> Row
+utteranceToRow ts no (Left e) = Row
+  { study_id = "19.4"
+  , input = "N/A"
+  , corpus = tcCorpus ts
+  , child = tcChild ts
+  , child_age_mos = tcChildAge ts
+  , file = tcFile ts
+  , row_number = no
+  , speaker = Nothing
+  , duration_secs = Nothing
+  , tokens = Nothing
+  , types = Nothing
+  , error_type = Just e
+  }
+utteranceToRow ts no (Right utt) = Row
+  { study_id = "19.4"
+  , input = "N/A"
+  , corpus = tcCorpus ts
+  , child = tcChild ts
+  , child_age_mos = tcChildAge ts
+  , file = tcFile ts
+  , row_number = no
+  , speaker = Just $ utteranceSpeaker utt
+  , duration_secs = Just $ duration utt
+  , tokens = Just $ length (content utt)
+  , types = Just $ length (nub $ content utt)
+  , error_type = Nothing
+  }
+
+data Row = Row
+  { study_id      :: T.Text
+  , input         :: T.Text
+  , corpus        :: T.Text
+  , child         :: T.Text
+  , child_age_mos :: Float
+  , file          :: FilePath
+  , row_number    :: Int
+  , speaker       :: Maybe Speaker
+  , duration_secs :: Maybe Float
+  , tokens        :: Maybe Int
+  , types         :: Maybe Int
+  , error_type    :: Maybe Error
+  } deriving (Eq, Show, Read, Generic)
+
+instance ToRecord Row
+instance ToNamedRecord Row
+instance DefaultOrdered Row
 
 duration :: Utterance -> Float
 duration u = endTime u - startTime u
 
-sampleFile :: IO Document
-sampleFile = XML.readFile XML.def "Providence/Naima/nai54.xml"
+{-sampleFile :: IO Document-}
+{-sampleFile = XML.readFile XML.def "Providence/Naima/nai54.xml"-}
 
 average :: [Float] -> Float
 average x = sum x / fromIntegral (length x)
 
-parseTranscript :: Document -> [Either String Utterance]
-parseTranscript doc = doc ^.. root . entire . named "u" . to parseUtterance
+parseTranscript :: FilePath -> IO Transcript
+parseTranscript fp = parseTranscript' fp <$> XML.readFile XML.def fp
 
-parseUtterance :: Element -> Either String Utterance
+parseTranscript' :: HasCallStack => FilePath -> Document -> Transcript
+parseTranscript' fp doc = Transcript
+  { tcCorpus = doc ^. root . attr "Corpus"
+  , tcChild = doc ^. root ./ named "Participants" ./ attributeIs "id" "CHI" . attr "name"
+  , tcChildAge = age
+  , tcUtterances = doc ^.. root . entire . named "u" . to parseUtterance
+  , tcFile = fp
+  }
+  where
+    parseTime x y = parseTimeOrError True defaultTimeLocale x (T.unpack y)
+    date = parseTime "%F" $ doc ^. root . attr "Date"
+    birth = parseTime "%F"
+          $ doc ^. root ./ named "Participants"
+                        ./ attributeIs "id" "CHI"
+                        . attr "birthday"
+    age = (fromRational $ toRational $ diffUTCTime date birth) / (60 * 60 * 24 * 30)
+
+parseUtterance :: Element -> Either Error Utterance
 parseUtterance s = do
-  start <- comm "start" ( s ^. entire . named "media" . attribute "start")
-  e <- comm "end" ( s ^. entire . named "media" . attribute "end")
+  who <- Speaker <$> note MissingSpeaker (s ^. attribute "who")
+  start <- note (NoMediaTag who) ( s ^. entire . named "media" . attribute "start")
+  e <- note (NoMediaTag who) ( s ^. entire . named "media" . attribute "end")
   let w = (s ^.. entire . named "w" . text)
-  who <- comm "who" (s ^. attribute "who")
-  return $ Utterance (r start) (r e) (w) (r who)
+  return $ Utterance (r start) (r e) (w) who
   where
     r :: Read a => T.Text -> a
     r = read . T.unpack
-    comm :: String -> Maybe v -> Either String v
-    comm s Nothing = Left s
-    comm _ (Just v)  = Right v
-
----------------------------------------------------------------------------}}}
+    note :: Error -> Maybe v -> Either Error v
+    note e = maybe (Left e) Right

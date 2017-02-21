@@ -5,13 +5,13 @@ import Control.Monad
 import Data.List
 import System.Directory
 import System.Environment
-import Data.Csv
+import qualified Data.ByteString.Lazy as BS
 
 main :: IO ()
 main = do
-  [dir] <- getArgs
+  [dir'] <- getArgs
+  let dir = if "/" `isSuffixOf` dir' then dir' else dir' ++ "/"
   files <- getDirectoryContents dir
-  forM_ (filter (".xml" `isSuffixOf`) files) $ \f -> do
-    putStrLn $ "File:\t" ++ (dir ++ f)
-    prettyIsh =<< allStats (dir ++ f)
-    putStrLn $ "\n"
+  csvs <- forM (sort $ filter (".xml" `isSuffixOf`) files) $ \f ->
+    parseTranscript $ dir ++ f
+  BS.writeFile "output.csv" $ toCSV csvs
